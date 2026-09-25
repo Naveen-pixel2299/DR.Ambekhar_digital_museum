@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive VR Museum - Ambedkar Experience</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Playfair+Display:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; color: white; user-select: none; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        .glass-panel { background: rgba(10, 10, 15, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .heritage-font { font-family: 'Playfair Display', serif; }
+
+        #start-screen { transition: opacity 1s ease, transform 1s ease; }
+        #fade-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; z-index: 5; opacity: 0; pointer-events: none; transition: opacity 2s ease; }
+        
+        #vr-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2;
+            pointer-events: none; opacity: 0; transition: opacity 2s ease;
+            background: radial-gradient(circle at center, transparent 20%, rgba(0, 5, 10, 0.6) 80%, rgba(0, 0, 0, 1) 100%);
+            box-shadow: inset 0 0 150px rgba(0, 255, 255, 0.05);
+        }
+        
+        #vr-overlay::after {
+            content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 3px);
+            pointer-events: none;
+        }
+
+        #vr-hud {
+            position: absolute; bottom: 40px; width: 100%; text-align: center;
+            opacity: 0; transition: opacity 1s ease; z-index: 10; pointer-events: none;
+        }
+
+        .btn-glow { transition: all 0.3s ease; box-shadow: 0 0 15px rgba(212, 175, 55, 0.3); }
+        .btn-glow:hover { box-shadow: 0 0 30px rgba(212, 175, 55, 0.7); transform: scale(1.05); }
+
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            transform: translate(-50%, -50%); border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 50%; z-index: 11; pointer-events: none; opacity: 0;
+            transition: all 0.2s ease;
+        }
+        #crosshair.active {
+            border-color: #d4af37; transform: translate(-50%, -50%) scale(1.5);
+            background: rgba(212, 175, 55, 0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="vr-overlay"></div>
+    <div id="fade-overlay"></div>
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div id="start-screen" class="glass-panel p-10 rounded-2xl shadow-2xl max-w-lg w-full text-center pointer-events-auto border-[#d4af37]/30">
+            <h1 class="heritage-font text-4xl text-[#d4af37] font-bold mb-2">Ambedkar Memorial Museum</h1>
+            <p class="text-gray-400 mb-8 text-sm">Walk through the marble atrium, meet his bronze statue, and step into the historical moments that shaped modern India.</p>
+            
+            <div class="mb-6 text-left">
+                <label class="block text-xs uppercase tracking-widest text-gray-400 mb-2">Select Neural Simulation</label>
+                <select id="theme-selector" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white outline-none focus:border-[#d4af37]">
+                    <option value="museum">Dr. B. R. Ambedkar: The Holographic Archive</option>
+                    <option value="live_speech">Live 3D Speech Visualization (Constituent Assembly)</option>
+                </select>
+            </div>
+
+            <button onclick="enterMuseum()" class="btn-glow w-full bg-[#d4af37] text-black font-bold text-lg py-4 rounded-lg uppercase tracking-widest mt-4 flex items-center justify-center gap-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+                Initialize VR Link
+            </button>
+            <p class="text-xs text-gray-500 mt-4">*Ensure volume is up for spatial audio.</p>
+        </div>
+
+        <div id="vr-hud">
+            <div class="inline-block glass-panel px-6 py-3 rounded-full border-cyan-500/30 mb-2">
+                <span class="text-cyan-400 font-medium tracking-widest text-sm flex items-center gap-2">
+                    <div class="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
+                    NEURAL LINK ACTIVE
+                </span>
+            </div>
+            <p id="hud-text" class="text-gray-300 text-sm tracking-wide bg-black/50 inline-block px-4 py-1 rounded-full backdrop-blur">Look around. Click glowing historical nodes to enter the simulation.</p>
+        </div>
+
+        <!-- Back Step: return to the entrance to choose a different event type -->
+        <div id="back-to-entrance" style="display: none;" class="absolute top-6 left-6 flex-col gap-3 pointer-events-auto z-20">
+            <button onclick="returnToEntrance()" class="btn-glow bg-black/60 border border-[#d4af37] text-[#d4af37] hover:bg-[#d4af37]/20 px-5 py-3 rounded-lg font-bold tracking-widest text-xs flex items-center justify-between w-52 shadow-[0_0_15px_rgba(212,175,55,0.3)] transition-all">
+                <span>↩ BACK TO ENTRANCE</span>
+            </button>
+        </div>
+
+        <!-- Simulation Controls (Moved to Top Right) -->
+        <div id="sim-controls" style="display: none;" class="absolute top-6 right-6 flex-col gap-3 pointer-events-auto z-20">
+            <button onclick="openArticle()" class="btn-glow bg-[#ff44aa]/20 border border-[#ff44aa] text-[#ff44aa] hover:bg-[#ff44aa]/40 px-5 py-3 rounded-lg font-bold tracking-widest text-xs flex items-center justify-between w-48 shadow-[0_0_15px_rgba(255,68,170,0.3)] transition-all">
+                <span>FULL ARTICLE</span> 📄
+            </button>
+            <button onclick="openChat()" class="btn-glow bg-[#00ffff]/20 border border-[#00ffff] text-[#00ffff] hover:bg-[#00ffff]/40 px-5 py-3 rounded-lg font-bold tracking-widest text-xs flex items-center justify-between w-48 shadow-[0_0_15px_rgba(0,255,255,0.3)] transition-all">
+                <span class="flex items-center gap-2"><div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div> AI ASSISTANT</span> 🤖
+            </button>
+            <button onclick="exitSimulation()" class="bg-gray-800 border border-gray-600 hover:bg-gray-700 text-white px-5 py-3 rounded-lg font-bold tracking-widest text-xs shadow-lg transition-all w-48 flex justify-between">
+                <span>EXIT SIMULATION</span> 🚪
+            </button>
+        </div>
+
+
+        <!-- Article Details Panel -->
+        <div id="article-panel" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl glass-panel rounded-xl flex-col z-20 pointer-events-auto border-[#ff44aa]/50 shadow-[0_0_50px_rgba(255,68,170,0.2)]" style="height: 75vh; display: none;">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-black/60 rounded-t-xl">
+                <h3 class="text-[#ff44aa] font-bold flex items-center gap-2 tracking-widest">📄 HISTORICAL DOCUMENT & TIMELINE</h3>
+                <button onclick="closeArticle()" class="text-gray-400 hover:text-white font-bold text-xl transition-colors">✕</button>
+            </div>
+            <div class="flex-1 p-6 overflow-y-auto space-y-6 text-sm flex flex-col bg-black/40">
+                <div>
+                    <h4 class="text-cyan-400 font-bold uppercase tracking-widest mb-2 text-xs">Timeline Context</h4>
+                    <p id="article-date" class="text-gray-300 text-lg font-serif italic"></p>
+                </div>
+                <div>
+                    <h4 class="text-cyan-400 font-bold uppercase tracking-widest mb-2 text-xs">Full Archival Text</h4>
+                    <div id="article-content" class="text-gray-200 text-base leading-relaxed font-serif whitespace-pre-wrap"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Chat Interface (Removed Tailwind 'hidden' class to prevent display conflicts) -->
+        <div id="ai-chat-panel" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-lg glass-panel rounded-xl flex-col z-20 pointer-events-auto border-[#00ffff]/50 shadow-[0_0_50px_rgba(0,255,255,0.2)]" style="height: 70vh; display: none;">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-black/60 rounded-t-xl">
+                <h3 class="text-[#00ffff] font-bold flex items-center gap-2 tracking-widest"><div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div> ARCHIVE AI ASSISTANT</h3>
+                <button onclick="closeChat()" class="text-gray-400 hover:text-white font-bold text-xl">✕</button>
+            </div>
+            <div id="chat-messages" class="flex-1 p-5 overflow-y-auto space-y-4 text-sm flex flex-col bg-black/40">
+                <div class="bg-gray-800/80 p-3 rounded-lg rounded-tl-none self-start max-w-[85%] border border-gray-700 shadow-lg">
+                    <p class="text-cyan-400 mb-1 text-xs font-bold uppercase tracking-wider">System AI</p>
+                    <p class="text-gray-200 text-base leading-relaxed">I am the neural archive assistant. Ask me anything about this specific historical document, its context, or Dr. Ambedkar's rationale.</p>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-700 bg-black/60 rounded-b-xl flex gap-3">
+                <input type="text" id="chat-input" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg p-3 text-white outline-none focus:border-[#00ffff] focus:ring-1 focus:ring-[#00ffff] transition-all" placeholder="Type your query here..." onkeypress="if(event.key === 'Enter') sendChatMessage()">
+                <button onclick="sendChatMessage()" class="bg-[#00ffff] hover:bg-cyan-400 text-black font-bold px-6 py-3 rounded-lg transition-all shadow-[0_0_15px_rgba(0,255,255,0.4)]">SEND</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let entranceGroup, vrGroup, particleSystem;
+        let entranceHoloRing, entranceLightShaft;
+        let simulationScenes = {}; 
+        let floatingPanels = [];
+        let interactables = [];
+        let raycaster, mouse;
+        let isVRMode = false;
+        let hoveredObject = null;
+        let currentMode = 'museum'; 
+        let activeSimScene = null;
+        let simulationContent = null;
+        let generatedTextures = {};
+        let isChatOpen = false;
+        let isArticleOpen = false;
+
+        const clock = new THREE.Clock();
+
+        const historicalData = {
+            'live_speech': {
+                scene: 'theater',
+                rule: "The Grammar of Anarchy Speech (1949)",
+                problem: "The nation was transitioning from protesting the British to a democracy. Continuing to use unconstitutional methods like Satyagraha threatened to bring anarchy and destroy the newly established republic.",
+                rationale: "If we wish to maintain democracy not merely in form, but also in fact, we must hold fast to constitutional methods. We must abandon the bloody methods of revolution.",
+                thoughts: "The true test begins now. Will the people respect the institutions we have built, or will they tear them down in the name of protest? We must switch from agitation to legislation.",
+                date: "Nov 25, 1949 - Central Hall, Parliament",
+                fullText: "Excerpt from 'The Grammar of Anarchy' Speech:\n\n'If we wish to maintain democracy not merely in form, but also in fact, what must we do? The first thing in my judgment we must do is to hold fast to constitutional methods of achieving our social and economic objectives.\n\nIt means we must abandon the bloody methods of revolution. It means that we must abandon the method of civil disobedience, non-cooperation and satyagraha. When there was no way left for constitutional methods for achieving economic and social objectives, there was a great deal of justification for unconstitutional methods.\n\nBut where constitutional methods are open, there can be no justification for these unconstitutional methods. These methods are nothing but the Grammar of Anarchy and the sooner they are abandoned, the better for us.'"
+            },
+            'art32': {
+                scene: 'assembly_desk',
+                rule: "Article 32: Constitutional Remedies",
+                problem: "Historically, marginalized groups had no legal recourse against discrimination. Rights on paper are useless if the vulnerable cannot legally enforce them against the State or powerful entities.",
+                rationale: "I consider this Article to be the very soul of the Constitution. A right without a remedy is a worthless declaration. We must provide a direct mechanism to enforce fundamental rights.",
+                thoughts: "The burden is immense. The minorities are anxious. We cannot just declare equality on paper; we must engineer it into the very machinery of the state.",
+                date: "November 1948 - Constitution Hall, Desk",
+                fullText: "Article 32: (1) The right to move the Supreme Court by appropriate proceedings for the enforcement of the rights conferred by this Part is guaranteed. \n\n(2) The Supreme Court shall have power to issue directions or orders or writs, including writs in the nature of habeas corpus, mandamus, prohibition, quo warranto and certiorari, whichever may be appropriate, for the enforcement of any of the rights conferred by this Part."
+            },
+            'art14': {
+                scene: 'assembly_podium',
+                rule: "Article 14 & 15: Equality Before Law",
+                problem: "The deeply entrenched caste system legally and socially treated human beings as inherently unequal, denying basic civic rights based on birth.",
+                rationale: "The State shall not deny to any person equality before the law. We must recognize the principle of one man, one value in our political and social life. Discrimination must be obliterated.",
+                thoughts: "We are entering a life of contradictions. In politics, equality; in social life, inequality. If we do not remove this contradiction, those who suffer will blow up the structure of democracy.",
+                date: "1947 - Constituent Assembly Address",
+                fullText: "Article 14: The State shall not deny to any person equality before the law or the equal protection of the laws within the territory of India. \n\nArticle 15: (1) The State shall not discriminate against any citizen on grounds only of religion, race, caste, sex, place of birth or any of them."
+            },
+            'mahad': {
+                scene: 'mahad_tank',
+                rule: "The Mahad Satyagraha",
+                problem: "Untouchables were denied access to public water bodies despite paying taxes, reflecting an absolute and humiliating social exclusion.",
+                rationale: "Water is a public good, denied to us by the orthodoxy. We are not just fighting for water, we are fighting for our human dignity and the absolute right to exist in public spaces.",
+                thoughts: "They will resist violently, but we must march. Drinking from the Chavdar tank is just the beginning. The minds of men must be cleansed of caste prejudices.",
+                date: "March 1927 - Mahad, Maharashtra",
+                fullText: "Resolution of the Mahad Municipality (1924) enforced by Satyagraha (1927): \n\n'The untouchables have an absolute right to use the Chavdar tank.' \n\nThis event marked one of the first open, organized civil rights movements in India, establishing that civic infrastructure belongs equally to all citizens regardless of caste."
+            },
+            'education': {
+                scene: 'columbia_lib',
+                rule: "Education as Liberation",
+                problem: "Education was historically monopolized by upper castes. The depressed classes were denied the intellectual tools necessary to challenge systemic oppression.",
+                rationale: "Cultivation of mind should be the ultimate aim of human existence. Without education, the oppressed will not realize their own power to change their destiny and challenge the oppressive systems.",
+                thoughts: "Knowledge is the greatest equalizer. The hours spent in Columbia and London libraries were my armory. I must pass this intellectual weapon to my people.",
+                date: "1915 - Columbia University Library",
+                fullText: "Excerpt from Writings: \n\n'We may forego material benefits, but we cannot forego our right and opportunities to reap the benefit of the highest education to the fullest extent. \n\nIt is education that is the right weapon to cut the social slavery, and it is the education that will enlighten the downtrodden masses to come up and gain social status, economic betterment and political freedom.'"
+            },
+            'progress': {
+                scene: 'delhi_office',
+                rule: "Women's Empowerment & Hindu Code",
+                problem: "Existing personal laws subjugated women in matters of marriage, divorce, and property inheritance, making them entirely dependent and legally inferior.",
+                rationale: "I measure the progress of a community by the degree of progress which women have achieved. The Hindu Code Bill is essential to secure their rights to property, divorce, and personal liberty.",
+                thoughts: "Society cannot soar on one wing. The oppression of women is deeply tied to the caste structure. To break one, we must break the other, even if it means resigning my post.",
+                date: "1951 - Law Minister's Office, Delhi",
+                fullText: "The Hindu Code Bill (Draft Excerpts): \n\n1. To amend and codify branches of Hindu Law relating to Intestate Succession and Marriage. \n2. To grant women absolute ownership of property (abolishing limited estate). \n3. To introduce monogamy as a rule of law. \n4. To allow for divorce, granting women the right to legally exit oppressive marriages."
+            },
+            'mantra': {
+                scene: 'nagpur_rally',
+                rule: "Educate, Agitate, Organize",
+                problem: "The depressed classes lacked the organizational unity, political consciousness, and self-belief required to sustain a mass movement against millennia of oppression.",
+                rationale: "My final words of advice to you are educate, agitate and organize; have faith in yourself. With justice on our side, I do not see how we can lose our battle for human rights.",
+                thoughts: "A leader can only point the way. The masses must become their own liberators through unity, intellect, and relentless struggle.",
+                date: "1942 - All India Depressed Classes Conference",
+                fullText: "Address to the All India Depressed Classes Conference (Nagpur, 1942): \n\n'You must abolish your slavery yourselves. Do not depend for its abolition upon God or a superman... \n\nMy final words of advice to you are Educate, Agitate and Organize; have faith in yourself. With justice on our side, I do not see how we can lose our battle. The battle to me is a matter of joy.'"
+            }
+        };
+
+        const ambedkarContent = [
+            { title: "On Education", text: "Cultivation of mind should be the ultimate aim of human existence.", color: "#44aaff", simType: 'education' },
+            { title: "On Progress", text: "I measure progress by the degree of progress which women have achieved.", color: "#ff44aa", simType: 'progress' },
+            { title: "Article 32", text: "The soul of the Constitution and the very heart of it.", color: "#d4af37", simType: 'art32' },
+            { title: "Mahad March", text: "We are fighting for our human dignity and the right to exist.", color: "#44ffaa", simType: 'mahad' },
+            { title: "The Mantra", text: "Be Educated, Be Organised and Be Agitated.", color: "#ffaa44", simType: 'mantra' },
+            { title: "Article 14 & 15", text: "Equality may be a fiction but one must accept it as a governing principle.", color: "#9944ff", simType: 'art14' }
+        ];
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020202);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.6, 7); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.enableZoom = false; 
+            controls.enablePan = false;
+            controls.minAzimuthAngle = -Math.PI / 6;
+            controls.maxAzimuthAngle = Math.PI / 6;
+            controls.minPolarAngle = Math.PI / 2 - 0.1;
+            controls.maxPolarAngle = Math.PI / 2 + 0.1;
+            controls.target.set(0, 1.6, 0); 
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+            
+            generateProceduralTextures();
+            buildEntrance();
+            buildVRSpace();
+            buildAll6Simulations();
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('click', onClick);
+            window.addEventListener('touchstart', onTouchStart, {passive: false});
+        }
+
+        function generateProceduralTextures() {
+            // Wood Texture
+            const woodCanvas = document.createElement('canvas');
+            woodCanvas.width = 512; woodCanvas.height = 512;
+            const wCtx = woodCanvas.getContext('2d');
+            wCtx.fillStyle = '#4a2f1d'; wCtx.fillRect(0,0,512,512);
+            for(let i=0; i<500; i++) {
+                wCtx.fillStyle = `rgba(50, 30, 15, ${Math.random()*0.1})`;
+                wCtx.fillRect(0, Math.random()*512, 512, Math.random()*5);
+            }
+            generatedTextures.wood = new THREE.CanvasTexture(woodCanvas);
+            generatedTextures.wood.wrapS = THREE.RepeatWrapping;
+            generatedTextures.wood.wrapT = THREE.RepeatWrapping;
+
+            // Water Texture
+            const waterCanvas = document.createElement('canvas');
+            waterCanvas.width = 512; waterCanvas.height = 512;
+            const waCtx = waterCanvas.getContext('2d');
+            waCtx.fillStyle = '#0a1a2a'; waCtx.fillRect(0,0,512,512);
+            for(let i=0; i<200; i++) {
+                waCtx.strokeStyle = `rgba(20, 50, 80, ${Math.random()*0.3})`;
+                waCtx.beginPath();
+                waCtx.arc(Math.random()*512, Math.random()*512, Math.random()*20+10, 0, Math.PI*2);
+                waCtx.stroke();
+            }
+            generatedTextures.water = new THREE.CanvasTexture(waterCanvas);
+
+            // Marble Texture (for the museum entrance floor & columns)
+            const marbleCanvas = document.createElement('canvas');
+            marbleCanvas.width = 512; marbleCanvas.height = 512;
+            const mCtx = marbleCanvas.getContext('2d');
+            mCtx.fillStyle = '#e8e2d5'; mCtx.fillRect(0, 0, 512, 512);
+            for (let i = 0; i < 14; i++) {
+                mCtx.strokeStyle = `rgba(140, 130, 110, ${0.15 + Math.random() * 0.25})`;
+                mCtx.lineWidth = 1 + Math.random() * 2;
+                mCtx.beginPath();
+                let x = Math.random() * 512, y = 0;
+                mCtx.moveTo(x, y);
+                for (let j = 0; j < 6; j++) {
+                    x += (Math.random() - 0.5) * 120; y += 512 / 6;
+                    mCtx.lineTo(x, y);
+                }
+                mCtx.stroke();
+            }
+            mCtx.strokeStyle = 'rgba(200, 170, 90, 0.12)';
+            for (let i = 0; i < 40; i++) {
+                mCtx.beginPath();
+                mCtx.moveTo(Math.random() * 512, Math.random() * 512);
+                mCtx.lineTo(Math.random() * 512, Math.random() * 512);
+                mCtx.stroke();
+            }
+            generatedTextures.marble = new THREE.CanvasTexture(marbleCanvas);
+            generatedTextures.marble.wrapS = THREE.RepeatWrapping;
+            generatedTextures.marble.wrapT = THREE.RepeatWrapping;
+            generatedTextures.marble.repeat.set(4, 4);
+
+            // Plaque texture for the statue base ("DR. B. R. AMBEDKAR")
+            const plaqueCanvas = document.createElement('canvas');
+            plaqueCanvas.width = 512; plaqueCanvas.height = 128;
+            const pCtx = plaqueCanvas.getContext('2d');
+            pCtx.fillStyle = '#0d0d0d'; pCtx.fillRect(0, 0, 512, 128);
+            pCtx.strokeStyle = '#d4af37'; pCtx.lineWidth = 4; pCtx.strokeRect(6, 6, 500, 116);
+            pCtx.fillStyle = '#d4af37'; pCtx.textAlign = 'center';
+            pCtx.font = 'bold 34px "Playfair Display", serif';
+            pCtx.fillText('DR. B. R. AMBEDKAR', 256, 55);
+            pCtx.font = '18px "Inter", sans-serif'; pCtx.fillStyle = '#eee';
+            pCtx.fillText('ARCHITECT OF THE CONSTITUTION OF INDIA', 256, 90);
+            generatedTextures.plaque = new THREE.CanvasTexture(plaqueCanvas);
+
+            // Museum pediment title texture
+            const titleCanvas = document.createElement('canvas');
+            titleCanvas.width = 1024; titleCanvas.height = 256;
+            const tiCtx = titleCanvas.getContext('2d');
+            tiCtx.fillStyle = 'rgba(0,0,0,0)'; tiCtx.fillRect(0, 0, 1024, 256);
+            tiCtx.textAlign = 'center';
+            tiCtx.fillStyle = '#d4af37';
+            tiCtx.font = 'bold 64px "Playfair Display", serif';
+            tiCtx.fillText('AMBEDKAR MEMORIAL MUSEUM', 512, 100);
+            tiCtx.font = 'italic 28px "Inter", sans-serif'; tiCtx.fillStyle = '#f0e6c8';
+            tiCtx.fillText('— Holographic Heritage Archive —', 512, 150);
+            generatedTextures.title = new THREE.CanvasTexture(titleCanvas);
+        }
+
+        // Detailed, jointed Ambedkar figure. posture: 'sitting' | 'podium' | 'leading' | 'statue'.
+        // isStatue = true renders a single-tone bronze/patina statue finish for the museum centerpiece.
+        function createAmbedkarFigure(posture = 'sitting', isStatue = false) {
+            const group = new THREE.Group();
+
+            const skinColor  = isStatue ? 0x4a3826 : 0x8d5524;
+            const suitColor  = isStatue ? 0x3b2f22 : 0x1a365d;
+            const shirtColor = isStatue ? 0x3b2f22 : 0xffffff;
+            const tieColor   = isStatue ? 0x3b2f22 : 0x7a1f2b;
+            const hairColor  = isStatue ? 0x241c14 : 0x0d0d0d;
+            const shoeColor  = isStatue ? 0x2a2015 : 0x0a0a0a;
+            const metalness  = isStatue ? 0.55 : 0.05;
+            const roughness  = isStatue ? 0.4 : 0.8;
+
+            const skinMat  = new THREE.MeshStandardMaterial({ color: skinColor, roughness, metalness });
+            const suitMat  = new THREE.MeshStandardMaterial({ color: suitColor, roughness: Math.min(roughness + 0.05, 1), metalness });
+            const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.6, metalness });
+            const tieMat   = new THREE.MeshStandardMaterial({ color: tieColor, roughness: 0.5, metalness });
+            const hairMat  = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.85, metalness: metalness * 0.4 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.25, metalness: 0.6 });
+            const shoeMat  = new THREE.MeshStandardMaterial({ color: shoeColor, roughness: 0.35, metalness: metalness * 0.6 });
+
+            // Torso
+            const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.85, 16), suitMat);
+            torso.position.y = 1.05; torso.castShadow = true; group.add(torso);
+
+            const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.42, 0.04), shirtMat);
+            shirt.position.set(0, 1.18, 0.335); group.add(shirt);
+
+            const tie = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.3, 0.03), tieMat);
+            tie.position.set(0, 1.1, 0.35); group.add(tie);
+
+            const lapelGeo = new THREE.BoxGeometry(0.13, 0.42, 0.05);
+            const leftLapel = new THREE.Mesh(lapelGeo, suitMat);
+            leftLapel.position.set(-0.13, 1.22, 0.31); leftLapel.rotation.z = 0.4; group.add(leftLapel);
+            const rightLapel = new THREE.Mesh(lapelGeo, suitMat);
+            rightLapel.position.set(0.13, 1.22, 0.31); rightLapel.rotation.z = -0.4; group.add(rightLapel);
+
+            for (let i = 0; i < 3; i++) {
+                const btn = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), suitMat);
+                btn.position.set(0.02, 0.98 - i * 0.12, 0.365); group.add(btn);
+            }
+
+            // Neck & head
+            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.095, 0.1, 12), skinMat);
+            neck.position.y = 1.55; group.add(neck);
+
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 32, 32), skinMat);
+            head.position.y = 1.74; head.scale.set(0.94, 1.08, 0.98); head.castShadow = true; group.add(head);
+
+            const earGeo = new THREE.SphereGeometry(0.042, 12, 12);
+            const leftEar = new THREE.Mesh(earGeo, skinMat); leftEar.position.set(-0.205, 1.735, 0.005); leftEar.scale.set(0.55, 1, 0.55); group.add(leftEar);
+            const rightEar = new THREE.Mesh(earGeo, skinMat); rightEar.position.set(0.205, 1.735, 0.005); rightEar.scale.set(0.55, 1, 0.55); group.add(rightEar);
+
+            const nose = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.08, 8), skinMat);
+            nose.position.set(0, 1.72, 0.205); nose.rotation.x = Math.PI / 2 + 0.35; group.add(nose);
+
+            // Signature swept-back hairline
+            const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.215, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
+            hairCap.position.y = 1.775; group.add(hairCap);
+
+            // Round glasses
+            const leftG = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.011, 8, 24), glassMat);
+            leftG.position.set(-0.09, 1.745, 0.2);
+            const rightG = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.011, 8, 24), glassMat);
+            rightG.position.set(0.09, 1.745, 0.2);
+            const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.01, 0.01), glassMat);
+            bridge.position.set(0, 1.745, 0.205);
+            group.add(leftG); group.add(rightG); group.add(bridge);
+
+            // Arms: shoulder pivot -> upper arm -> elbow -> forearm -> hand
+            function buildArm(sign) {
+                const arm = new THREE.Group();
+                arm.position.set(sign * 0.35, 1.4, 0);
+                const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 0.36, 12), suitMat);
+                upper.position.y = -0.18; arm.add(upper);
+                const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), suitMat);
+                elbow.position.y = -0.36; arm.add(elbow);
+                const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.32, 12), suitMat);
+                fore.position.y = -0.52; arm.add(fore);
+                const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 10), skinMat);
+                hand.position.y = -0.68; hand.scale.set(0.8, 1, 0.6); arm.add(hand);
+                arm.userData.hand = hand;
+                return arm;
+            }
+            const leftArm = buildArm(-1);
+            const rightArm = buildArm(1);
+
+            // Legs: hip pivot -> thigh -> knee -> (shin group, bends independently) -> shoe
+            function buildLeg(sign) {
+                const leg = new THREE.Group();
+                leg.position.set(sign * 0.14, 1.0, 0);
+                const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.46, 12), suitMat);
+                thigh.position.y = -0.23; leg.add(thigh);
+                const knee = new THREE.Mesh(new THREE.SphereGeometry(0.095, 10, 10), suitMat);
+                knee.position.y = -0.46; leg.add(knee);
+                const shinGroup = new THREE.Group();
+                shinGroup.position.y = -0.46;
+                const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.46, 12), suitMat);
+                shin.position.y = -0.23; shinGroup.add(shin);
+                const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.08, 0.25), shoeMat);
+                shoe.position.set(0, -0.46, 0.05); shinGroup.add(shoe);
+                leg.add(shinGroup);
+                leg.userData = { shinGroup };
+                return leg;
+            }
+            const leftLeg = buildLeg(-1);
+            const rightLeg = buildLeg(1);
+
+            if (posture === 'sitting') {
+                leftLeg.rotation.x = -Math.PI / 2 + 0.15;
+                rightLeg.rotation.x = -Math.PI / 2 + 0.15;
+                leftLeg.userData.shinGroup.rotation.x = Math.PI / 2 - 0.15;
+                rightLeg.userData.shinGroup.rotation.x = Math.PI / 2 - 0.15;
+                leftArm.rotation.x = -0.6; rightArm.rotation.x = -0.6;
+            } else if (posture === 'podium') {
+                leftArm.rotation.x = -0.35; rightArm.rotation.x = -0.35;
+            } else if (posture === 'statue') {
+                // Iconic pose: right arm raised forward, left hand holding the Constitution
+                rightArm.rotation.x = -1.5; rightArm.rotation.z = -0.1;
+                leftArm.rotation.x = -0.95;
+                const book = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.15, 0.2, 0.045),
+                    new THREE.MeshStandardMaterial({ color: isStatue ? suitColor : 0x6b2b1f, roughness: 0.5, metalness })
+                );
+                book.position.set(0, -0.66, 0.06); book.rotation.x = -0.3;
+                leftArm.userData.hand.add(book);
+            } else {
+                // Leading a march - arm raised high
+                rightArm.rotation.x = -2.3; rightArm.rotation.z = 0.15;
+                leftArm.rotation.x = -0.15;
+            }
+
+            group.add(leftArm); group.add(rightArm); group.add(leftLeg); group.add(rightLeg);
+            group.traverse(o => { if (o.isMesh) o.castShadow = true; });
+            return group;
+        }
+
+        // Convenience wrapper for the bronze centerpiece statue at the museum entrance
+        function createAmbedkarStatue() {
+            return createAmbedkarFigure('statue', true);
+        }
+
+        function createCrowd(count, radius, isSitting) {
+            const crowdGroup = new THREE.Group();
+            // Changed from CapsuleGeometry to CylinderGeometry for r128 compatibility
+            const bodyGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.2, 8);
+            const headGeo = new THREE.SphereGeometry(0.25, 8, 8);
+            
+            for(let i=0; i<count; i++) {
+                const mat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().setHSL(0, 0, 0.1 + Math.random()*0.2), 
+                    roughness: 0.9
+                });
+                const person = new THREE.Group();
+                const body = new THREE.Mesh(bodyGeo, mat);
+                const head = new THREE.Mesh(headGeo, mat);
+                
+                if(isSitting) {
+                    body.scale.set(1, 0.6, 1);
+                    body.position.y = 0.5;
+                    head.position.y = 1.2;
+                } else {
+                    body.position.y = 0.8;
+                    head.position.y = 1.8;
+                }
+                
+                person.add(body); person.add(head);
+                
+                const angle = Math.random() * Math.PI * 2;
+                const r = radius + Math.random() * (radius * 0.5);
+                person.position.set(Math.cos(angle) * r, 0, Math.sin(angle) * r);
+                person.lookAt(0, person.position.y, 0); // Look at center
+                crowdGroup.add(person);
+            }
+            return crowdGroup;
+        }
+
+        function buildEntrance() {
+            entranceGroup = new THREE.Group();
+
+            // Grand marble facade wall
+            const wall = new THREE.Mesh(new THREE.PlaneGeometry(30, 15), new THREE.MeshStandardMaterial({ color: 0x1c1a16, roughness: 0.85 }));
+            wall.position.set(0, 5, -0.3); entranceGroup.add(wall);
+
+            // Museum name carved into the pediment above the doors
+            const titlePanel = new THREE.Mesh(
+                new THREE.PlaneGeometry(12, 3),
+                new THREE.MeshBasicMaterial({ map: generatedTextures.title, transparent: true })
+            );
+            titlePanel.position.set(0, 8.2, -0.1); entranceGroup.add(titlePanel);
+
+            // Grand doors
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x2a1610, map: generatedTextures.wood });
+            const leftDoor = new THREE.Mesh(new THREE.BoxGeometry(2.5, 4.5, 0.2), doorMat);
+            leftDoor.position.set(-1.25, 2.25, 0);
+            const rightDoor = new THREE.Mesh(new THREE.BoxGeometry(2.5, 4.5, 0.2), doorMat);
+            rightDoor.position.set(1.25, 2.25, 0);
+            entranceGroup.add(leftDoor); entranceGroup.add(rightDoor);
+
+            // Marble columns flanking the entrance
+            const columnMat = new THREE.MeshStandardMaterial({ color: 0xe8e2d5, map: generatedTextures.marble, roughness: 0.5 });
+            [-6, -3.6, 3.6, 6].forEach(x => {
+                const col = new THREE.Group();
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.6, 0.4, 20), columnMat);
+                base.position.y = 0.2; col.add(base);
+                const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 8, 20), columnMat);
+                shaft.position.y = 4.4; col.add(shaft);
+                const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.5, 0.4, 20), columnMat);
+                cap.position.y = 8.6; col.add(cap);
+                col.position.set(x, 0, 1.5);
+                entranceGroup.add(col);
+            });
+
+            // Grand marble floor & steps leading up to the doors
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 20),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, map: generatedTextures.marble, roughness: 0.4 })
+            );
+            floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, 5); entranceGroup.add(floor);
+
+            for (let i = 0; i < 3; i++) {
+                const step = new THREE.Mesh(
+                    new THREE.BoxGeometry(14 - i * 1.4, 0.18, 1.1),
+                    new THREE.MeshStandardMaterial({ color: 0xdcd6c8, map: generatedTextures.marble, roughness: 0.5 })
+                );
+                step.position.set(0, 0.09 + i * 0.18, 3.6 - i * 1.1);
+                entranceGroup.add(step);
+            }
+
+            // Domed glass skylight overhead - the source of the god-rays below
+            const domeMat = new THREE.MeshStandardMaterial({ color: 0x0a0e14, roughness: 0.3, metalness: 0.4, side: THREE.BackSide });
+            const dome = new THREE.Mesh(new THREE.SphereGeometry(11, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
+            dome.position.set(0, 9.5, 4); entranceGroup.add(dome);
+
+            const skylightGlow = new THREE.Mesh(
+                new THREE.CircleGeometry(2.6, 32),
+                new THREE.MeshBasicMaterial({ color: 0xfff2cc, transparent: true, opacity: 0.55 })
+            );
+            skylightGlow.rotation.x = Math.PI / 2; skylightGlow.position.set(0, 10.3, 4);
+            entranceGroup.add(skylightGlow);
+
+            // Volumetric light shaft falling from the skylight into the atrium
+            const shaftMat = new THREE.MeshBasicMaterial({ color: 0xffe9b8, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false });
+            entranceLightShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 3.2, 10, 24, 1, true), shaftMat);
+            entranceLightShaft.position.set(0, 5, 4); entranceGroup.add(entranceLightShaft);
+
+            // Glass exhibit cases along the atrium walls, each holding a small artifact
+            function buildDisplayCase(x, artifactMesh, labelColor) {
+                const caseGroup = new THREE.Group();
+                const base = new THREE.Mesh(new THREE.BoxGeometry(1, 0.9, 1), new THREE.MeshStandardMaterial({ color: 0x8f8a7a, map: generatedTextures.marble, roughness: 0.5 }));
+                base.position.y = 0.45; caseGroup.add(base);
+                const glass = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.9, 1.1, 0.9),
+                    new THREE.MeshPhysicalMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.18, roughness: 0.05, metalness: 0, transmission: 0.9, side: THREE.DoubleSide })
+                );
+                glass.position.y = 1.45; caseGroup.add(glass);
+                artifactMesh.position.y = 1.1; caseGroup.add(artifactMesh);
+                const rim = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.02, 8, 24), new THREE.MeshBasicMaterial({ color: labelColor }));
+                rim.rotation.x = Math.PI / 2; rim.position.y = 0.91; caseGroup.add(rim);
+                const caseLight = new THREE.PointLight(labelColor, 1, 3); caseLight.position.y = 1.9; caseGroup.add(caseLight);
+                caseGroup.position.set(x, 0, 2.6);
+                return caseGroup;
+            }
+            // Exhibit 1: The Constitution (book on a stand)
+            const bookArtifact = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.45, 0.08), new THREE.MeshStandardMaterial({ color: 0x7a1f2b, roughness: 0.5 }));
+            bookArtifact.rotation.x = -0.3;
+            entranceGroup.add(buildDisplayCase(-4.8, bookArtifact, 0x00ffff));
+
+            // Exhibit 2: Scales of justice
+            const scalesArtifact = new THREE.Group();
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.03, 0.03), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.6, roughness: 0.3 }));
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.4), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.6, roughness: 0.3 }));
+            pole.position.y = -0.2;
+            const panL = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.02, 12), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.6 }));
+            panL.position.set(-0.22, -0.2, 0);
+            const panR = panL.clone(); panR.position.set(0.22, -0.2, 0);
+            scalesArtifact.add(beam); scalesArtifact.add(pole); scalesArtifact.add(panL); scalesArtifact.add(panR);
+            entranceGroup.add(buildDisplayCase(4.8, scalesArtifact, 0xd4af37));
+
+            // Bronze Ambedkar statue - the centerpiece of the entrance foyer, on a glowing holographic dais
+            const statueGroup = new THREE.Group();
+            const pedestal = new THREE.Mesh(
+                new THREE.BoxGeometry(1.4, 1.1, 1.1),
+                new THREE.MeshStandardMaterial({ color: 0x8f8a7a, map: generatedTextures.marble, roughness: 0.5 })
+            );
+            pedestal.position.y = 0.55; statueGroup.add(pedestal);
+
+            const plaque = new THREE.Mesh(
+                new THREE.PlaneGeometry(1.1, 0.3),
+                new THREE.MeshBasicMaterial({ map: generatedTextures.plaque })
+            );
+            plaque.position.set(0, 0.55, 0.56); statueGroup.add(plaque);
+
+            const statue = createAmbedkarStatue();
+            statue.position.y = 1.1; statueGroup.add(statue);
+
+            // Rotating holographic dais ring beneath the pedestal - ties into the "Holographic Archive" theme
+            entranceHoloRing = new THREE.Group();
+            const ringOuter = new THREE.Mesh(new THREE.RingGeometry(0.95, 1.05, 48), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
+            ringOuter.rotation.x = -Math.PI / 2; ringOuter.position.y = 0.03;
+            const ringInner = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.76, 48), new THREE.MeshBasicMaterial({ color: 0xd4af37, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+            ringInner.rotation.x = -Math.PI / 2; ringInner.position.y = 0.03;
+            entranceHoloRing.add(ringOuter); entranceHoloRing.add(ringInner);
+            statueGroup.add(entranceHoloRing);
+
+            // Warm rim light dedicated to the statue for a museum-spotlight feel
+            const statueLight = new THREE.SpotLight(0xffe6b0, 3, 12, Math.PI / 7, 0.4, 1);
+            statueLight.position.set(1.5, 5, 5); statueLight.target = statue;
+            statueGroup.add(statueLight); statueGroup.add(statueLight.target);
+
+            statueGroup.position.set(3.6, 0, 4.2);
+            entranceGroup.add(statueGroup);
+
+            // Wall sconces along the facade for gallery-style ambient lighting
+            [-8, -1.25 - 4, 1.25 + 4, 8].forEach(x => {
+                const sconce = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffdca0 }));
+                sconce.position.set(x, 3.2, -0.15); entranceGroup.add(sconce);
+                const sconceLight = new THREE.PointLight(0xffdca0, 1.2, 6);
+                sconceLight.position.copy(sconce.position); entranceGroup.add(sconceLight);
+            });
+
+            // Light atmospheric haze so light shafts and spotlights read clearly
+            scene.fog = new THREE.FogExp2(0x02020a, 0.018);
+
+            // Soft dust/light-beam particles drifting through the atrium
+            const dustGeo = new THREE.BufferGeometry();
+            const dustCount = 400;
+            const dustPos = new Float32Array(dustCount * 3);
+            for (let i = 0; i < dustCount; i++) {
+                dustPos[i * 3] = (Math.random() - 0.5) * 20;
+                dustPos[i * 3 + 1] = Math.random() * 8;
+                dustPos[i * 3 + 2] = Math.random() * 12 - 2;
+            }
+            dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+            const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.03, color: 0xffe6b0, transparent: true, opacity: 0.35 }));
+            entranceGroup.add(dust);
+
+            // Warm golden key light over the doorway, plus soft overall fill
+            const spotLight = new THREE.SpotLight(0xd4af37, 2.4, 30, Math.PI / 5, 0.5, 1);
+            spotLight.position.set(0, 7, 5); spotLight.target.position.set(0, 2, 0);
+            entranceGroup.add(spotLight); entranceGroup.add(spotLight.target);
+
+            const fillLight = new THREE.HemisphereLight(0xfff3d6, 0x1a1712, 0.6);
+            entranceGroup.add(fillLight);
+
+            scene.add(entranceGroup);
+        }
+
+        function buildVRSpace() {
+            vrGroup = new THREE.Group();
+            vrGroup.visible = false; 
+
+            const particleGeo = new THREE.BufferGeometry();
+            const posArray = new Float32Array(3000 * 3);
+            for(let i = 0; i < 9000; i++) posArray[i] = (Math.random() - 0.5) * 80;
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            particleSystem = new THREE.Points(particleGeo, new THREE.PointsMaterial({ size: 0.08, color: 0x00ffff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending }));
+            vrGroup.add(particleSystem);
+
+            const radius = 6;
+            ambedkarContent.forEach((item, index) => {
+                const angle = (index / ambedkarContent.length) * Math.PI * 2;
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024; canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+                
+                // Tech/Data look background
+                const grad = ctx.createLinearGradient(0,0, 1024, 512);
+                grad.addColorStop(0, 'rgba(5, 10, 15, 0.9)'); grad.addColorStop(1, 'rgba(0, 20, 30, 0.95)');
+                ctx.fillStyle = grad; ctx.fillRect(0, 0, 1024, 512);
+                
+                ctx.strokeStyle = item.color; ctx.lineWidth = 6; ctx.strokeRect(10, 10, 1004, 492);
+                
+                ctx.fillStyle = item.color; ctx.font = 'bold 56px "Playfair Display", serif';
+                ctx.textAlign = 'center'; ctx.fillText(item.title, 512, 100);
+                
+                ctx.fillStyle = 'white'; ctx.font = '36px "Inter", sans-serif';
+                wrapText(ctx, `"${item.text}"`, 512, 180, 850, 50);
+                
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.8)'; ctx.font = '28px sans-serif';
+                ctx.fillText("▶ INITIALIZE MEMORY SEQUENCE", 512, 460);
+
+                const texture = new THREE.CanvasTexture(canvas);
+                const panel = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+                
+                panel.position.set(Math.cos(angle) * radius, 1.6 + (Math.random() - 0.5) * 2, Math.sin(angle) * radius);
+                panel.lookAt(0, 1.6, 0);
+                panel.userData = { baseY: panel.position.y, targetScale: 1, speed: 0.4 + Math.random() * 0.5, offset: Math.random() * Math.PI * 2, simType: item.simType };
+                floatingPanels.push(panel);
+                vrGroup.add(panel);
+            });
+            scene.add(vrGroup);
+        }
+
+        function createFloatingScreen(w = 5, h = 4) {
+            return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+        }
+        
+        function createInteractable(type) {
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 1.1), new THREE.MeshStandardMaterial({ color: 0xffffee, emissive: 0x111111 }));
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.userData = { isInteractable: true, action: 'read_thoughts' };
+            return mesh;
+        }
+
+        function buildAll6Simulations() {
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3219, map: generatedTextures.wood });
+            
+            // 1. Assembly Desk (Article 32)
+            const sc1 = new THREE.Group();
+            const aFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshStandardMaterial({ color: 0x3a2219 }));
+            aFloor.rotation.x = -Math.PI/2; sc1.add(aFloor);
+            const desk = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 2), woodMat);
+            desk.position.set(0, 0.5, -2); sc1.add(desk);
+            const char1 = createAmbedkarFigure('sitting'); char1.position.set(0, 0, -2.5); sc1.add(char1);
+            const doc1 = createInteractable(); doc1.position.set(0, 1.01, -2); sc1.add(doc1);
+            const l1 = new THREE.SpotLight(0xffdd88, 2); l1.position.set(0, 10, 0); sc1.add(l1);
+            const cr1 = createCrowd(15, 6, true); cr1.position.set(0, 0, 5); sc1.add(cr1); 
+            
+            const scr1 = createFloatingScreen(); scr1.position.set(4, 2.5, -3); scr1.rotation.y = -Math.PI/6; sc1.add(scr1);
+            const scr1_detail = createFloatingScreen(4.5, 4.5); scr1_detail.position.set(-4, 2.5, -3); scr1_detail.rotation.y = Math.PI/6; scr1_detail.userData = { isDetailScreen: true }; sc1.add(scr1_detail);
+            
+            sc1.visible = false; scene.add(sc1);
+            simulationScenes['assembly_desk'] = { group: sc1, screen: scr1, screen2: scr1_detail, doc: doc1, target: new THREE.Vector3(0, 1.0, -2) };
+
+            // 2. Assembly Podium (Article 14/15)
+            const sc2 = new THREE.Group();
+            sc2.add(aFloor.clone());
+            const podium = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1), woodMat);
+            podium.position.set(0, 0.75, -2); sc2.add(podium);
+            const char2 = createAmbedkarFigure('podium'); char2.position.set(0, 0, -2.5); sc2.add(char2);
+            const doc2 = createInteractable(); doc2.position.set(0, 1.51, -2); doc2.rotation.x = -Math.PI/4; sc2.add(doc2);
+            const l2 = new THREE.SpotLight(0xffffff, 2.5); l2.position.set(0, 10, -2); sc2.add(l2);
+            const cr2 = createCrowd(30, 5, true); cr2.position.set(0, 0, 4); sc2.add(cr2); 
+            
+            const scr2 = createFloatingScreen(); scr2.position.set(4, 2.5, -2); scr2.rotation.y = -Math.PI/6; sc2.add(scr2);
+            const scr2_detail = createFloatingScreen(4.5, 4.5); scr2_detail.position.set(-4, 2.5, -2); scr2_detail.rotation.y = Math.PI/6; scr2_detail.userData = { isDetailScreen: true }; sc2.add(scr2_detail);
+            
+            sc2.visible = false; scene.add(sc2);
+            simulationScenes['assembly_podium'] = { group: sc2, screen: scr2, screen2: scr2_detail, doc: doc2, target: new THREE.Vector3(0, 1.5, -2) };
+
+            // 3. Mahad Tank (Society)
+            const sc3 = new THREE.Group();
+            const mFloor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x1a2a1a }));
+            mFloor.rotation.x = -Math.PI/2; sc3.add(mFloor);
+            const water = new THREE.Mesh(new THREE.PlaneGeometry(20, 15), new THREE.MeshStandardMaterial({ color: 0x113355, map: generatedTextures.water }));
+            water.rotation.x = -Math.PI/2; water.position.set(0, 0.05, -6); sc3.add(water);
+            const mStep = new THREE.Mesh(new THREE.BoxGeometry(22, 0.5, 2), new THREE.MeshStandardMaterial({color: 0x555555}));
+            mStep.position.set(0, 0.25, -2); sc3.add(mStep);
+            const char3 = createAmbedkarFigure('leading'); char3.position.set(0, 0.5, -1); sc3.add(char3);
+            const doc3 = createInteractable(); doc3.position.set(0, 1.5, -0.5); doc3.rotation.x = -Math.PI/4; sc3.add(doc3);
+            const l3 = new THREE.DirectionalLight(0x4466aa, 1.5); l3.position.set(5, 10, 5); sc3.add(l3);
+            const cr3 = createCrowd(40, 4, false); cr3.position.set(0, 0, 3); sc3.add(cr3);
+            
+            const scr3 = createFloatingScreen(); scr3.position.set(-5, 3, -2); scr3.rotation.y = Math.PI/6; sc3.add(scr3);
+            const scr3_detail = createFloatingScreen(4.5, 4.5); scr3_detail.position.set(5, 3, -2); scr3_detail.rotation.y = -Math.PI/6; scr3_detail.userData = { isDetailScreen: true }; sc3.add(scr3_detail);
+            
+            sc3.visible = false; scene.add(sc3);
+            simulationScenes['mahad_tank'] = { group: sc3, screen: scr3, screen2: scr3_detail, doc: doc3, target: new THREE.Vector3(0, 1.5, -1) };
+
+            // 4. Columbia Library (Education)
+            const sc4 = new THREE.Group();
+            const lFloor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), woodMat); lFloor.rotation.x = -Math.PI/2; sc4.add(lFloor);
+            for(let i=0; i<4; i++) {
+                const shelf = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 1), woodMat);
+                shelf.position.set(-6 + i*4, 4, -5); sc4.add(shelf);
+            }
+            const lDesk = new THREE.Mesh(new THREE.BoxGeometry(3, 0.8, 2), woodMat); lDesk.position.set(0, 0.4, -2); sc4.add(lDesk);
+            const char4 = createAmbedkarFigure('sitting'); char4.position.set(0, 0, -2.8); sc4.add(char4);
+            const doc4 = createInteractable(); doc4.position.set(0.5, 0.81, -1.8); sc4.add(doc4);
+            const l4 = new THREE.PointLight(0xfff0dd, 2, 15); l4.position.set(-1, 2, -2); sc4.add(l4); 
+            
+            const scr4 = createFloatingScreen(); scr4.position.set(4, 2.5, -2); scr4.rotation.y = -Math.PI/6; sc4.add(scr4);
+            const scr4_detail = createFloatingScreen(4.5, 4.5); scr4_detail.position.set(-4, 2.5, -2); scr4_detail.rotation.y = Math.PI/6; scr4_detail.userData = { isDetailScreen: true }; sc4.add(scr4_detail);
+            
+            sc4.visible = false; scene.add(sc4);
+            simulationScenes['columbia_lib'] = { group: sc4, screen: scr4, screen2: scr4_detail, doc: doc4, target: new THREE.Vector3(0, 1.0, -2) };
+
+            // 5. Delhi Office 1950s (Progress)
+            const sc5 = new THREE.Group();
+            const oFloor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({color: 0x444444})); oFloor.rotation.x = -Math.PI/2; sc5.add(oFloor);
+            const oDesk = new THREE.Mesh(new THREE.BoxGeometry(4, 0.8, 2), new THREE.MeshStandardMaterial({color: 0x222222})); oDesk.position.set(0, 0.4, -2); sc5.add(oDesk);
+            for(let i=0; i<15; i++) {
+                const p = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.4), new THREE.MeshBasicMaterial({color: 0xeeeeee}));
+                p.rotation.x = -Math.PI/2; p.rotation.z = Math.random()*Math.PI;
+                p.position.set(-1.5 + Math.random()*3, 0.805, -2.5 + Math.random()*1);
+                sc5.add(p);
+            }
+            const char5 = createAmbedkarFigure('sitting'); char5.position.set(0, 0, -2.8); sc5.add(char5);
+            const doc5 = createInteractable(); doc5.position.set(0, 0.81, -2); sc5.add(doc5);
+            const l5 = new THREE.SpotLight(0xaaccff, 2); l5.position.set(0, 5, 0); sc5.add(l5);
+            
+            const scr5 = createFloatingScreen(); scr5.position.set(4, 2.5, -2); scr5.rotation.y = -Math.PI/6; sc5.add(scr5);
+            const scr5_detail = createFloatingScreen(4.5, 4.5); scr5_detail.position.set(-4, 2.5, -2); scr5_detail.rotation.y = Math.PI/6; scr5_detail.userData = { isDetailScreen: true }; sc5.add(scr5_detail);
+            
+            sc5.visible = false; scene.add(sc5);
+            simulationScenes['delhi_office'] = { group: sc5, screen: scr5, screen2: scr5_detail, doc: doc5, target: new THREE.Vector3(0, 1.0, -2) };
+
+            // 6. Nagpur Rally Stage (Mantra)
+            const sc6 = new THREE.Group();
+            const rFloor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({color: 0x332211})); rFloor.rotation.x = -Math.PI/2; sc6.add(rFloor);
+            const stage = new THREE.Mesh(new THREE.BoxGeometry(10, 1.5, 4), new THREE.MeshStandardMaterial({color: 0x551111})); stage.position.set(0, 0.75, -4); sc6.add(stage);
+            const char6 = createAmbedkarFigure('podium'); char6.position.set(0, 1.5, -3.5); sc6.add(char6);
+            const doc6 = createInteractable(); doc6.position.set(0, 2.5, -3); doc6.rotation.x = -Math.PI/4; sc6.add(doc6);
+            const cr6 = createCrowd(100, 10, false); cr6.position.set(0, 0, 5); sc6.add(cr6); 
+            const l6 = new THREE.DirectionalLight(0xffaa55, 2); l6.position.set(-10, 5, -5); sc6.add(l6); 
+            
+            const scr6 = createFloatingScreen(); scr6.position.set(5, 4, -4); scr6.rotation.y = -Math.PI/6; sc6.add(scr6);
+            const scr6_detail = createFloatingScreen(5.5, 5.5); scr6_detail.position.set(-5, 4, -4); scr6_detail.rotation.y = Math.PI/6; scr6_detail.userData = { isDetailScreen: true }; sc6.add(scr6_detail);
+            
+            sc6.visible = false; scene.add(sc6);
+            simulationScenes['nagpur_rally'] = { group: sc6, screen: scr6, screen2: scr6_detail, doc: doc6, target: new THREE.Vector3(0, 2.5, -3) };
+
+            // 7. Live 3D Movie Theater (Speech Visualization)
+            const sc7 = new THREE.Group();
+            const tFloor = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.9 }));
+            tFloor.rotation.x = -Math.PI/2; sc7.add(tFloor);
+            const tStage = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 10), new THREE.MeshStandardMaterial({color: 0x1a1a1a}));
+            tStage.position.set(0, 0.5, -15); sc7.add(tStage);
+            
+            // Holographic Movie Screen Projection
+            const tScreenCanvas = document.createElement('canvas');
+            tScreenCanvas.width = 1024; tScreenCanvas.height = 512;
+            const tCtx = tScreenCanvas.getContext('2d');
+            tCtx.fillStyle = '#02050a'; tCtx.fillRect(0,0,1024,512);
+            tCtx.fillStyle = 'rgba(0, 255, 255, 0.4)';
+            for(let i=0; i<50; i++) { tCtx.fillRect(i*20 + 15, 256 - Math.random()*150, 12, Math.random()*300); }
+            tCtx.fillStyle = '#ffffff'; tCtx.font = 'bold 45px sans-serif'; tCtx.textAlign = 'center';
+            tCtx.fillText("▶ LIVE 3D FEED: CONSTITUENT ASSEMBLY, 1949", 512, 60);
+            
+            const tMovieTex = new THREE.CanvasTexture(tScreenCanvas);
+            const tMovieScreen = new THREE.Mesh(new THREE.PlaneGeometry(16, 9), new THREE.MeshBasicMaterial({map: tMovieTex}));
+            tMovieScreen.position.set(0, 6, -19); sc7.add(tMovieScreen);
+
+            const tChar = createAmbedkarFigure('podium'); tChar.position.set(0, 1, -13.5); sc7.add(tChar);
+            const tDoc = createInteractable(); tDoc.position.set(0, 2.2, -13); tDoc.rotation.x = -Math.PI/4; sc7.add(tDoc);
+            
+            const projector = new THREE.SpotLight(0x00ffff, 2, 50, Math.PI/6, 0.5, 1);
+            projector.position.set(0, 10, 10); projector.lookAt(0, 6, -19); sc7.add(projector);
+            sc7.add(new THREE.AmbientLight(0x111122, 1));
+            
+            const tCrowd = createCrowd(50, 8, true); tCrowd.position.set(0, 0, -5); sc7.add(tCrowd);
+            
+            const scr7 = createFloatingScreen(); scr7.position.set(7, 4, -10); scr7.rotation.y = -Math.PI/4; sc7.add(scr7);
+            const scr7_detail = createFloatingScreen(5.5, 5.5); scr7_detail.position.set(-7, 4, -10); scr7_detail.rotation.y = Math.PI/4; scr7_detail.userData = { isDetailScreen: true }; sc7.add(scr7_detail);
+            
+            sc7.visible = false; scene.add(sc7);
+            simulationScenes['theater'] = { group: sc7, screen: scr7, screen2: scr7_detail, doc: tDoc, target: new THREE.Vector3(0, 3, -13) };
+        }
+
+        function updateFloatingScreen(data, screenMesh) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'rgba(5, 10, 15, 0.95)'; ctx.fillRect(0, 0, 1024, 1024);
+            ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 4; ctx.strokeRect(10, 10, 1004, 1004);
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.1)'; ctx.fillRect(10, 10, 1004, 80);
+            
+            ctx.fillStyle = '#d4af37'; ctx.font = 'bold 46px "Playfair Display", serif';
+            ctx.fillText(data.rule, 40, 65);
+            ctx.fillStyle = '#aaaaaa'; ctx.font = '22px "Inter", sans-serif';
+            ctx.fillText("DATA LOG: " + data.date.toUpperCase(), 40, 125);
+            
+            // Problem Context (NEW)
+            ctx.fillStyle = '#ff5555'; ctx.font = 'bold 30px "Inter", sans-serif';
+            ctx.fillText("PROBLEM ORIGIN:", 40, 190);
+            ctx.fillStyle = '#ffcccc'; ctx.font = '30px "Inter", sans-serif';
+            wrapText(ctx, data.problem, 40, 235, 940, 40);
+
+            // Historical Context
+            ctx.fillStyle = '#00ffff'; ctx.font = 'bold 30px "Inter", sans-serif';
+            ctx.fillText("HISTORICAL CONTEXT:", 40, 440);
+            ctx.fillStyle = '#ffffff'; ctx.font = '32px "Inter", sans-serif';
+            wrapText(ctx, data.rationale, 40, 490, 940, 42);
+
+            // Inner Thoughts
+            ctx.fillStyle = '#ffaa44'; ctx.font = 'bold 30px "Inter", sans-serif';
+            ctx.fillText("RECORDED INNER THOUGHTS:", 40, 710);
+            ctx.fillStyle = '#dddddd'; ctx.font = 'italic 32px "Playfair Display", serif';
+            wrapText(ctx, `"${data.thoughts}"`, 40, 760, 940, 42);
+
+            ctx.fillStyle = '#00ffff'; ctx.font = '22px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText("AUDIO LINK READY: CLICK GLOWING DESK NODE TO PLAY", 512, 950);
+            ctx.fillText("USE HUD BUTTONS BELOW TO OPEN AI OR EXIT SIMULATION", 512, 990);
+
+            screenMesh.material.map = new THREE.CanvasTexture(canvas);
+            screenMesh.material.needsUpdate = true;
+        }
+
+        // NEW: Function for the Second Floating Screen (Full Text & AI Trigger)
+        function updateDetailScreen(data, screenMesh) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'rgba(10, 5, 15, 0.95)'; ctx.fillRect(0, 0, 1024, 1024);
+            ctx.strokeStyle = '#ff44aa'; ctx.lineWidth = 4; ctx.strokeRect(10, 10, 1004, 1004);
+            
+            // Header
+            ctx.fillStyle = 'rgba(255, 68, 170, 0.15)'; ctx.fillRect(10, 10, 1004, 90);
+            ctx.fillStyle = '#ff44aa'; ctx.font = 'bold 46px "Inter", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText("COMPLETE DOCUMENT ARCHIVE", 512, 70);
+
+            // Full Text body
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#ffffff'; ctx.font = '32px "Playfair Display", serif';
+            
+            // Handle paragraphs in full text
+            const paragraphs = data.fullText.split('\n\n');
+            let currentY = 160;
+            paragraphs.forEach(p => {
+                wrapText(ctx, p, 40, currentY, 940, 45);
+                // Rough estimate for spacing (line height * lines)
+                const lines = Math.ceil(ctx.measureText(p).width / 940);
+                currentY += (lines * 45) + 30; 
+            });
+
+            // AI Button Box at bottom
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.2)'; ctx.fillRect(100, 850, 824, 100);
+            ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 4; ctx.strokeRect(100, 850, 824, 100);
+            
+            ctx.fillStyle = '#00ffff'; ctx.font = 'bold 36px "Inter", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText("🟢 CLICK HERE TO OPEN AI ASSISTANT", 512, 915);
+
+            screenMesh.material.map = new THREE.CanvasTexture(canvas);
+            screenMesh.material.needsUpdate = true;
+        }
+
+        function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+            const words = text.split(' '); let line = '';
+            for(let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                if (ctx.measureText(testLine).width > maxWidth && n > 0) {
+                    ctx.fillText(line, x, y); line = words[n] + ' '; y += lineHeight;
+                } else line = testLine;
+            }
+            ctx.fillText(line, x, y);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            if (currentMode === 'transitioning') return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            checkIntersections();
+        }
+
+        function onTouchStart(event) {
+            if (currentMode === 'transitioning') return;
+            if(event.touches.length > 0) {
+                mouse.x = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.touches[0].clientY / window.innerHeight) * 2 + 1;
+                checkIntersections(); onClick();
+            }
+        }
+
+        function checkIntersections() {
+            raycaster.setFromCamera(mouse, camera);
+            
+            let targets = [];
+            if (currentMode === 'museum') {
+                targets = floatingPanels;
+            } else if (currentMode === 'simulation' && activeSimScene) {
+                // Check doc and the second screen for clicks
+                targets = [activeSimScene.doc, activeSimScene.screen2];
+            }
+
+            const intersects = raycaster.intersectObjects(targets);
+            const crosshair = document.getElementById('crosshair');
+
+            if (currentMode === 'museum') {
+                floatingPanels.forEach(p => { p.userData.targetScale = 1; });
+            } else if (currentMode === 'simulation' && activeSimScene) {
+                if(activeSimScene.doc.material.emissive) activeSimScene.doc.material.emissive.setHex(0x111111);
+            }
+
+            if (intersects.length > 0) {
+                hoveredObject = intersects[0].object;
+                if (currentMode === 'museum') {
+                    hoveredObject.userData.targetScale = 1.15; 
+                } else if (hoveredObject.userData.action === 'read_thoughts') {
+                    hoveredObject.material.emissive.setHex(0x00ffff); 
+                } else if (hoveredObject.userData.isDetailScreen) {
+                    crosshair.style.borderColor = '#ff44aa'; // Highlight crosshair for AI screen
+                }
+                crosshair.classList.add('active');
+                document.body.style.cursor = 'pointer';
+            } else {
+                hoveredObject = null;
+                crosshair.style.borderColor = 'rgba(0, 255, 255, 0.5)';
+                crosshair.classList.remove('active');
+                document.body.style.cursor = 'grab';
+            }
+        }
+
+        function onClick() {
+            // Prevent 3D clicks if the HTML chat or article overlay is open
+            if (isChatOpen || isArticleOpen) return;
+
+            if (currentMode === 'museum' && hoveredObject) {
+                if (hoveredObject.userData.simType && historicalData[hoveredObject.userData.simType]) {
+                    enterSimulation(hoveredObject.userData.simType);
+                }
+            } else if (currentMode === 'simulation') {
+                if (hoveredObject && hoveredObject.userData.action === 'read_thoughts') {
+                    playAudioQuote("Log entry: " + simulationContent.rule + ". Context: " + simulationContent.rationale + " Inner thoughts: " + simulationContent.thoughts);
+                    hoveredObject.material.emissive.setHex(0xffffff);
+                    setTimeout(()=> hoveredObject.material.emissive.setHex(0x111111), 500);
+                } else if (hoveredObject && hoveredObject.userData.isDetailScreen) {
+                    // Open HTML AI Chat
+                    openChat();
+                }
+                // Removed the exitSimulation() on background click to prevent accidental exits.
+                // Users will now use the new UI "Exit Simulation" button.
+            }
+        }
+
+        function playAudioQuote(text) {
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US'; utterance.rate = 0.9; utterance.pitch = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function enterSimulation(simKey) {
+            simulationContent = historicalData[simKey];
+            activeSimScene = simulationScenes[simulationContent.scene];
+            currentMode = 'transitioning';
+            window.speechSynthesis.cancel();
+            
+            const fade = document.getElementById('fade-overlay');
+            fade.style.opacity = '1';
+            document.getElementById('hud-text').innerText = `CONNECTING TO MEMORY: ${simulationContent.date.toUpperCase()}`;
+
+            setTimeout(() => {
+                vrGroup.visible = false;
+                Object.values(simulationScenes).forEach(s => s.group.visible = false);
+                activeSimScene.group.visible = true;
+                
+                camera.position.set(0, 1.5, 0.5); 
+                controls.target.copy(activeSimScene.target);
+                controls.minPolarAngle = Math.PI / 4; controls.maxPolarAngle = Math.PI / 2 + 0.2;
+
+                updateFloatingScreen(simulationContent, activeSimScene.screen);
+                updateDetailScreen(simulationContent, activeSimScene.screen2); // Update the 2nd screen
+                
+                fade.style.opacity = '0';
+                currentMode = 'simulation';
+                document.getElementById('hud-text').innerText = `Simulation active. Read the screens, click the glowing desk node, or open AI.`;
+                document.getElementById('sim-controls').style.display = 'flex'; // Show controls
+                playAudioQuote("Simulation loaded. " + simulationContent.rule);
+            }, 2000);
+        }
+
+        function exitSimulation() {
+            currentMode = 'transitioning';
+            document.getElementById('sim-controls').style.display = 'none'; // Hide controls immediately
+            window.speechSynthesis.cancel();
+            closeChat(); // Ensure chat closes if exiting
+            closeArticle(); // Ensure article closes if exiting
+            const fade = document.getElementById('fade-overlay');
+            fade.style.opacity = '1';
+
+            setTimeout(() => {
+                if(activeSimScene) activeSimScene.group.visible = false;
+                vrGroup.visible = true;
+                camera.position.set(0, 1.6, 0.1); controls.target.set(0, 1.6, 0);
+                controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
+                fade.style.opacity = '0'; currentMode = 'museum';
+                document.getElementById('hud-text').innerText = `Look around. Click glowing historical nodes to enter the simulation.`;
+                playAudioQuote("Simulation ended. Returning to the VR Archive.");
+            }, 2000);
+        }
+
+        // Back Step: walk all the way back out to the entrance atrium so the visitor
+        // can pick a different type of event (Holographic Archive vs Live Speech) again.
+        function returnToEntrance() {
+            currentMode = 'transitioning';
+            window.speechSynthesis.cancel();
+            closeChat();
+            closeArticle();
+            document.getElementById('sim-controls').style.display = 'none';
+            document.getElementById('back-to-entrance').style.display = 'none';
+            document.getElementById('vr-hud').style.opacity = '0';
+            document.getElementById('vr-overlay').style.opacity = '0';
+            document.getElementById('crosshair').style.opacity = '0';
+
+            const fade = document.getElementById('fade-overlay');
+            fade.style.opacity = '1';
+
+            setTimeout(() => {
+                // Hide every VR / simulation space
+                vrGroup.visible = false;
+                Object.values(simulationScenes).forEach(s => s.group.visible = false);
+                activeSimScene = null;
+                simulationContent = null;
+                isVRMode = false;
+
+                // Restore the entrance atrium exactly as it was on first load
+                entranceGroup.visible = true;
+                scene.fog = new THREE.FogExp2(0x02020a, 0.018);
+                camera.position.set(0, 1.6, 7);
+                controls.target.set(0, 1.6, 0);
+                controls.minAzimuthAngle = -Math.PI / 6; controls.maxAzimuthAngle = Math.PI / 6;
+                controls.minPolarAngle = Math.PI / 2 - 0.1; controls.maxPolarAngle = Math.PI / 2 + 0.1;
+
+                // Bring back the start screen so a different event type can be chosen
+                const startScreen = document.getElementById('start-screen');
+                startScreen.style.display = 'block';
+                startScreen.style.transform = 'scale(1)';
+                startScreen.style.opacity = '1';
+
+                currentMode = 'museum';
+                fade.style.opacity = '0';
+                playAudioQuote("Returning to the entrance. Choose your next experience.");
+            }, 2000);
+        }
+
+        function enterMuseum() {
+            const selectedTheme = document.getElementById('theme-selector').value;
+            
+            if(window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+            document.getElementById('start-screen').style.transform = 'scale(0.8)';
+            document.getElementById('start-screen').style.opacity = '0';
+            setTimeout(() => document.getElementById('start-screen').style.display = 'none', 1000);
+
+            let progress = 0; const startZ = camera.position.z;
+            function walkForward() {
+                progress += 0.015;
+                if (progress < 1) {
+                    const ease = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+                    camera.position.z = startZ - (startZ - 0.5) * ease;
+                    requestAnimationFrame(walkForward);
+                } else {
+                    const fade = document.getElementById('fade-overlay');
+                    fade.style.opacity = '1';
+                    setTimeout(() => {
+                        entranceGroup.visible = false; 
+                        scene.fog = null; // atmospheric haze was only for the entrance atrium
+                        
+                        if (selectedTheme === 'live_speech') {
+                            fade.style.opacity = '0';
+                            document.getElementById('vr-overlay').style.opacity = '1';
+                            document.getElementById('vr-hud').style.opacity = '1';
+                            document.getElementById('crosshair').style.opacity = '1';
+                            document.getElementById('back-to-entrance').style.display = 'flex';
+                            isVRMode = true;
+                            enterSimulation('live_speech');
+                        } else {
+                            vrGroup.visible = true;
+                            camera.position.set(0, 1.6, 0.1); controls.target.set(0, 1.6, 0);
+                            controls.minAzimuthAngle = Infinity; controls.maxAzimuthAngle = Infinity;
+                            controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI;
+                            isVRMode = true; currentMode = 'museum';
+                            fade.style.opacity = '0';
+                            document.getElementById('vr-overlay').style.opacity = '1';
+                            document.getElementById('vr-hud').style.opacity = '1';
+                            document.getElementById('crosshair').style.opacity = '1';
+                            document.getElementById('back-to-entrance').style.display = 'flex';
+                            playAudioQuote("Welcome to the VR Heritage archive. Look around and select a memory node.");
+                        }
+                    }, 2000);
+                }
+            }
+            walkForward();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            if (entranceHoloRing) {
+                entranceHoloRing.rotation.y = time * 0.4;
+                entranceHoloRing.children[1].rotation.z = -time * 0.6;
+            }
+            if (entranceLightShaft) {
+                entranceLightShaft.material.opacity = 0.08 + Math.sin(time * 0.6) * 0.02;
+            }
+
+            if (currentMode === 'museum' && isVRMode) {
+                floatingPanels.forEach(panel => {
+                    const diff = panel.userData.targetScale - panel.scale.x;
+                    panel.scale.addScalar(diff * 0.1);
+                    if (panel.userData.targetScale === 1) {
+                        panel.position.y = panel.userData.baseY + Math.sin(time * panel.userData.speed + panel.userData.offset) * 0.2;
+                    }
+                    panel.position.applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.0005 * panel.userData.speed);
+                    panel.lookAt(camera.position);
+                });
+                if (particleSystem) {
+                    particleSystem.rotation.y = time * 0.03;
+                    particleSystem.rotation.x = Math.sin(time * 0.01) * 0.1;
+                }
+            } else if (currentMode === 'simulation' && activeSimScene) {
+                // Bob both screens
+                activeSimScene.screen.position.y = activeSimScene.screen.position.y * 0.95 + (2.5 + Math.sin(time * 0.5) * 0.05) * 0.05; 
+                activeSimScene.screen.lookAt(camera.position);
+
+                if (activeSimScene.screen2) {
+                    activeSimScene.screen2.position.y = activeSimScene.screen2.position.y * 0.95 + (2.5 + Math.cos(time * 0.4) * 0.05) * 0.05; 
+                    activeSimScene.screen2.lookAt(camera.position);
+                }
+            }
+
+            if(isVRMode && currentMode !== 'transitioning' && mouse.x === 0 && mouse.y === 0) checkIntersections();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- AI Chat Logic ---
+        function openChat() {
+            isChatOpen = true;
+            document.getElementById('ai-chat-panel').style.display = 'flex';
+            document.getElementById('chat-input').focus();
+            controls.enabled = false; // Disable VR looking while chatting
+            document.body.style.cursor = 'default';
+        }
+
+        function closeChat() {
+            isChatOpen = false;
+            document.getElementById('ai-chat-panel').style.display = 'none';
+            if(!isArticleOpen) controls.enabled = true; // Re-enable VR looking if article is also closed
+        }
+
+        // --- Article Display Logic ---
+        function openArticle() {
+            isArticleOpen = true;
+            if (simulationContent) {
+                document.getElementById('article-date').innerText = simulationContent.date;
+                document.getElementById('article-content').innerText = simulationContent.fullText;
+            }
+            document.getElementById('article-panel').style.display = 'flex';
+            controls.enabled = false; // Disable VR looking
+            document.body.style.cursor = 'default';
+        }
+
+        function closeArticle() {
+            isArticleOpen = false;
+            document.getElementById('article-panel').style.display = 'none';
+            if(!isChatOpen) controls.enabled = true; // Re-enable VR looking if chat is also closed
+        }
+
+        function appendMessage(sender, text, colorClass) {
+            const container = document.getElementById('chat-messages');
+            const msgDiv = document.createElement('div');
+            const isUser = sender === 'You';
+            
+            msgDiv.className = `p-3 rounded-lg max-w-[85%] border border-gray-700 shadow-lg ${isUser ? 'bg-cyan-900/60 self-end rounded-tr-none' : 'bg-gray-800/80 self-start rounded-tl-none'}`;
+            
+            msgDiv.innerHTML = `
+                <p class="${colorClass} mb-1 text-xs font-bold uppercase tracking-wider">${sender}</p>
+                <p class="text-gray-200 text-base leading-relaxed">${text}</p>
+            `;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            appendMessage('You', text, 'text-gray-300');
+            input.value = '';
+            
+            // Simulate AI Processing delay
+            setTimeout(() => { simulateAIResponse(text); }, 800 + Math.random() * 1000);
+        }
+
+        function simulateAIResponse(userMessage) {
+            const lowerMsg = userMessage.toLowerCase();
+            let response = "";
+
+            if (!simulationContent) {
+                response = "I am currently disconnected from the historical database.";
+            } else if (lowerMsg.includes('why') || lowerMsg.includes('problem')) {
+                response = "The root of this issue was deeply systemic: " + simulationContent.problem;
+            } else if (lowerMsg.includes('who') || lowerMsg.includes('oppose')) {
+                response = "Dr. Ambedkar faced immense opposition from orthodox traditionalists, but his profound intellect and unwavering determination allowed him to push these necessary reforms through.";
+            } else if (lowerMsg.includes('meaning') || lowerMsg.includes('explain')) {
+                response = "In simple terms: " + simulationContent.rationale;
+            } else {
+                response = "Based on the archive data regarding '" + simulationContent.rule + "': Dr. Ambedkar formulated this based on his understanding of law and morality to combat the oppression of his time. " + simulationContent.thoughts;
+            }
+
+            appendMessage('System AI', response, 'text-cyan-400');
+        }
+    </script>
+</body>
+</html>
